@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
 
 int vagas[10][10];
 
@@ -82,11 +83,20 @@ void destroiVagas() {
 }
 
 pthread_t cancelaEntrada;
+pthread_mutex_t iteracoesMutex;
+int iteracoes = 10000;
 
 void *cancela() {
 
-  for (int i = 0; i < 10000; i++) {
-    printf("%d\t%d\n", i, tempoEspera(estado.entrada));
+  while (iteracoes > 0) {
+    int tempo = tempoEspera(estado.entrada);
+
+    printf("%d\t%d\n", iteracoes, tempo);
+    sleep(tempo);
+
+    pthread_mutex_lock(&iteracoesMutex);
+    iteracoes--;
+    pthread_mutex_unlock(&iteracoesMutex);
   }
 
   return NULL;
@@ -96,6 +106,10 @@ int main(void) {
   criaVagas();
 
   estado = CRITICO;
+
+  if (pthread_mutex_init(&iteracoesMutex, NULL) != 0) {
+    return 1;
+  }
 
   pthread_create(&cancelaEntrada, NULL, cancela, NULL);
   pthread_join(cancelaEntrada, NULL);
