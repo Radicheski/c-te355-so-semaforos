@@ -82,14 +82,36 @@ void destroiVagas() {
   }
 }
 
+typedef struct veiculo {
+   Vaga *vaga;
+   time_t chegada;
+   int tempoPermanencia;
+   struct veiculo *proximo;
+} Veiculo;
+
 pthread_t cancelaEntrada;
 pthread_mutex_t iteracoesMutex;
 int iteracoes = 10000;
 
+Veiculo *chegada() {
+  Veiculo *v = (Veiculo *) malloc(sizeof(Veiculo));
+  v->tempoPermanencia = tempoEspera(estado.saida);
+  v->chegada = time(NULL);
+  return v;
+}
+
 void *cancela() {
+  Veiculo *filaVeiculos;
 
   while (iteracoes > 0) {
     int tempo = tempoEspera(estado.entrada);
+
+    Veiculo *v = chegada();
+    v->proximo = filaVeiculos;
+
+    printf("%ld\n", v->chegada);
+
+    filaVeiculos = v;
 
     printf("%d\t%d\n", iteracoes, tempo);
     sleep(tempo);
@@ -115,6 +137,8 @@ int main(void) {
   pthread_join(cancelaEntrada, NULL);
 
   destroiVagas();
+
+  pthread_mutex_destroy(&iteracoesMutex);
 
   return 0;
 }
