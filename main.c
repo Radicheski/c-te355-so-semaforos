@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 int vagas[10][10];
 
@@ -11,8 +13,15 @@ void mostraVagas() {
   }
 }
 
+int tempoEspera(int max) {
+  return rand() % max;
+}
+
 int main(void) {
-  mostraVagas();
+  srand(time(NULL));
+  for (int i = 0; i < 5; i++) {
+    printf("%d\n", tempoEspera(5));
+  }
   return 0;
 }
 
