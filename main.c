@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -14,7 +15,7 @@ void mostraVagas() {
 }
 
 int tempoEspera(int max) {
-  return rand() % max;
+  return rand() % (max + 1);
 }
 
 typedef struct {
@@ -27,6 +28,8 @@ const Estado BALANCEADO_RAPIDO = {1, 1};
 const Estado TRANQUILO = {2, 1};
 const Estado OCIOSO = {4, 1};
 const Estado CRITICO = {1, 5};
+
+Estado estado;
 
 typedef struct vaga {
   int numero;
@@ -78,16 +81,24 @@ void destroiVagas() {
   }
 }
 
+pthread_t cancelaEntrada;
+
+void *cancela() {
+
+  for (int i = 0; i < 10000; i++) {
+    printf("%d\t%d\n", i, tempoEspera(estado.entrada));
+  }
+
+  return NULL;
+}
+
 int main(void) {
   criaVagas();
 
-  Vaga *v = NULL;
+  estado = CRITICO;
 
-  do {
-    v = ocupaVaga();
-    printf("%d\n", v->numero);
-    liberaVaga(v); // Causa loop infinito
-  } while (v != NULL);
+  pthread_create(&cancelaEntrada, NULL, cancela, NULL);
+  pthread_join(cancelaEntrada, NULL);
 
   destroiVagas();
 
