@@ -7,21 +7,21 @@
 int vagas[10][10];
 
 void mostraVagas() {
-  for (int i = 0; i < 10; i++) {
-    for (int j = 0; j < 10; j++) {
-      printf("%s", vagas[i][j] == 0 ? " " : "X");
+    for (int i = 0; i < 10; i++) {
+        for (int j = 0; j < 10; j++) {
+            printf("%s", vagas[i][j] == 0 ? " " : "X");
+        }
+        printf("\n");
     }
-    printf("\n");
-  }
 }
 
 int tempoEspera(int max) {
-  return rand() % (max + 1);
+    return rand() % (max + 1);
 }
 
 typedef struct {
-  int entrada;
-  int saida;
+    int entrada;
+    int saida;
 } Estado;
 
 const Estado BALANCEADO_LENTO = {2, 2};
@@ -33,118 +33,124 @@ const Estado CRITICO = {1, 5};
 Estado estado;
 
 typedef struct vaga {
-  int numero;
-  struct vaga *proxima;
+    int numero;
+    struct vaga *proxima;
 } Vaga;
 
 Vaga *proximaVaga = NULL;
 
 void criaVagas() {
-  for (int i = 99; i >= 0; i--) {
-    Vaga *v = (Vaga *) malloc(sizeof(Vaga));
-    v->numero = i;
-    v->proxima = proximaVaga;
-    proximaVaga = v;
-  }
+    for (int i = 99; i >= 0; i--) {
+        Vaga *v = (Vaga *) malloc(sizeof(Vaga));
+        v->numero = i;
+        v->proxima = proximaVaga;
+        proximaVaga = v;
+    }
 }
 
-Vaga* ocupaVaga() {
-  if (proximaVaga == NULL) {
-    return NULL;
-  }
+Vaga *ocupaVaga() {
+    if (proximaVaga == NULL) {
+        return NULL;
+    }
 
-  Vaga *vaga = proximaVaga;
-  proximaVaga = vaga->proxima;
-  vaga->proxima = NULL;
+    Vaga *vaga = proximaVaga;
+    proximaVaga = vaga->proxima;
+    vaga->proxima = NULL;
 
-  int i = vaga->numero / 10;
-  int j = vaga->numero % 10;
-  vagas[i][j] = 1;
+    int i = vaga->numero / 10;
+    int j = vaga->numero % 10;
+    vagas[i][j] = 1;
 
-  return vaga;
+    return vaga;
 }
 
 void liberaVaga(Vaga *vaga) {
-  vaga->proxima = proximaVaga;
-  proximaVaga = vaga;
+    vaga->proxima = proximaVaga;
+    proximaVaga = vaga;
 
-  int i = vaga->numero / 10;
-  int j = vaga->numero % 10;
-  vagas[i][j] = 0;
+    int i = vaga->numero / 10;
+    int j = vaga->numero % 10;
+    vagas[i][j] = 0;
 }
 
 void destroiVagas() {
-  Vaga *vaga = proximaVaga;
-  while (vaga != NULL) {
-    Vaga *temp = vaga;
-    vaga = vaga->proxima;
-    free(temp);
-  }
+    Vaga *vaga = proximaVaga;
+    while (vaga != NULL) {
+        Vaga *temp = vaga;
+        vaga = vaga->proxima;
+        free(temp);
+    }
 }
 
 typedef struct veiculo {
-   Vaga *vaga;
-   time_t chegada;
-   int tempoPermanencia;
-   struct veiculo *proximo;
+    Vaga *vaga;
+    time_t chegada;
+    int tempoPermanencia;
+    struct veiculo *proximo;
 } Veiculo;
 
 pthread_t cancelaEntrada;
 pthread_mutex_t iteracoesMutex;
-int iteracoes = 10;
+int iteracoes = 10000;
 
 Veiculo *chegada() {
-  pthread_mutex_lock(&iteracoesMutex);
+    pthread_mutex_lock(&iteracoesMutex);
 
-  if (iteracoes-- == 0) {
-    return NULL;
-  }
+    if (iteracoes-- == 0) {
+        return NULL;
+    }
 
-  pthread_mutex_unlock(&iteracoesMutex);
+    pthread_mutex_unlock(&iteracoesMutex);
 
-  Veiculo *v = (Veiculo *) malloc(sizeof(Veiculo));
-  v->tempoPermanencia = tempoEspera(estado.saida);
-  v->chegada = time(NULL);
+    Veiculo *v = (Veiculo *) malloc(sizeof(Veiculo));
+    v->tempoPermanencia = tempoEspera(estado.saida);
+    v->chegada = time(NULL);
 
-  return v;
+    return v;
 }
 
 void *cancela() {
-  Veiculo *filaVeiculos;
+    Veiculo *filaInicio;
+    Veiculo *filaFim;
 
-  Veiculo *v;
+    Veiculo *v;
 
-  while ((v = chegada()) != NULL) {
-    int tempo = tempoEspera(estado.entrada);
+    while ((v = chegada()) != NULL) {
+        int tempo = tempoEspera(estado.entrada);
 
-    v->proximo = filaVeiculos;
+        if (filaInicio == NULL) {
+            filaInicio = v;
+        }
 
-    printf("%ld\n", v->chegada);
+        if (filaFim != NULL) {
+            filaFim->proximo = v;
+        }
+        filaFim = v;
 
-    filaVeiculos = v;
+        printf("%ld\n", v->chegada);
 
-    printf("%d\t%d\n", iteracoes, tempo);
-    sleep(tempo);
-  }
+        printf("%d\t%d\n", iteracoes, tempo);
+        sleep(tempo);
+    }
 
-  return NULL;
+    return NULL;
 }
 
 int main(void) {
-  criaVagas();
+    criaVagas();
 
-  estado = CRITICO;
+    estado = CRITICO;
 
-  if (pthread_mutex_init(&iteracoesMutex, NULL) != 0) {
-    return 1;
-  }
+    if (pthread_mutex_init(&iteracoesMutex, NULL) != 0) {
+        return 1;
+    }
 
-  pthread_create(&cancelaEntrada, NULL, cancela, NULL);
-  pthread_join(cancelaEntrada, NULL);
+    pthread_create(&cancelaEntrada, NULL, cancela, NULL);
+    pthread_join(cancelaEntrada, NULL);
 
-  destroiVagas();
+    destroiVagas();
 
-  pthread_mutex_destroy(&iteracoesMutex);
+    pthread_mutex_destroy(&iteracoesMutex);
 
-  return 0;
+    return 0;
 }
