@@ -91,22 +91,32 @@ typedef struct veiculo {
 
 pthread_t cancelaEntrada;
 pthread_mutex_t iteracoesMutex;
-int iteracoes = 10000;
+int iteracoes = 10;
 
 Veiculo *chegada() {
+  pthread_mutex_lock(&iteracoesMutex);
+
+  if (iteracoes-- == 0) {
+    return NULL;
+  }
+
+  pthread_mutex_unlock(&iteracoesMutex);
+
   Veiculo *v = (Veiculo *) malloc(sizeof(Veiculo));
   v->tempoPermanencia = tempoEspera(estado.saida);
   v->chegada = time(NULL);
+
   return v;
 }
 
 void *cancela() {
   Veiculo *filaVeiculos;
 
-  while (iteracoes > 0) {
+  Veiculo *v;
+
+  while ((v = chegada()) != NULL) {
     int tempo = tempoEspera(estado.entrada);
 
-    Veiculo *v = chegada();
     v->proximo = filaVeiculos;
 
     printf("%ld\n", v->chegada);
@@ -115,10 +125,6 @@ void *cancela() {
 
     printf("%d\t%d\n", iteracoes, tempo);
     sleep(tempo);
-
-    pthread_mutex_lock(&iteracoesMutex);
-    iteracoes--;
-    pthread_mutex_unlock(&iteracoesMutex);
   }
 
   return NULL;
@@ -142,4 +148,3 @@ int main(void) {
 
   return 0;
 }
-
