@@ -148,6 +148,18 @@ void *adicionaVeiculo(void *arg) {
     return NULL;
 }
 
+void *espera(void *arg) {
+    Veiculo *veiculo = (Veiculo *) arg;
+
+    sleep(veiculo->tempoPermanencia);
+    liberaVaga(veiculo->vaga);
+
+    //TODO Apagar depois de criar lista de veículos
+    free(veiculo);
+
+    return NULL;
+}
+
 void *removeVeiculo(void *arg) {
     Cancela *cancela = (Cancela *) arg;
 
@@ -165,6 +177,10 @@ void *removeVeiculo(void *arg) {
             cancela->filaInicio = cancela->filaInicio->proximo;
 
             Vaga *vaga = ocupaVaga();
+
+            //TODO Dar join. Colocar thread dentro da struct veiculo
+            pthread_t esperaNaVaga;
+            pthread_create(&esperaNaVaga, NULL, espera, veiculo);
 
             printf("%d\t%d\n", iteracoes, vaga->numero);
             veiculo->vaga = vaga;
