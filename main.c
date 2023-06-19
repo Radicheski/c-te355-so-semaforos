@@ -104,34 +104,86 @@ Veiculo *chegada() {
 
     Veiculo *v = (Veiculo *) malloc(sizeof(Veiculo));
     v->tempoPermanencia = tempoEspera(estado.saida);
+    v->proximo = NULL;
     v->chegada = time(NULL);
 
     return v;
 }
 
-void *cancela() {
+typedef struct {
+    pthread_mutex_t *filaMutex;
     Veiculo *filaInicio;
     Veiculo *filaFim;
+} Cancela;
 
-    Veiculo *v;
+void *adicionaVeiculo(void *arg) {
+    Cancela *cancela = (Cancela *) arg;
 
-    while ((v = chegada()) != NULL) {
-        int tempo = tempoEspera(estado.entrada);
+    Veiculo *veiculo;
 
-        if (filaInicio == NULL) {
-            filaInicio = v;
+    while ((veiculo = chegada()) != NULL) {
+        pthread_mutex_lock(cancela->filaMutex);
+
+        if (cancela->filaInicio == NULL) {
+            cancela->filaInicio = veiculo;
         }
 
-        if (filaFim != NULL) {
-            filaFim->proximo = v;
+        if (cancela->filaFim != NULL) {
+            cancela->filaFim->proximo = veiculo;
         }
-        filaFim = v;
+        cancela->filaFim = veiculo;
 
-        printf("%ld\n", v->chegada);
+        pthread_mutex_unlock(cancela->filaMutex);
 
-        printf("%d\t%d\n", iteracoes, tempo);
-        sleep(tempo);
+        sleep(tempoEspera(estado.entrada));
     }
+
+    return NULL;
+}
+
+void *removeVeiculo(void *arg) {
+    Cancela *cancela = (Cancela *) arg;
+
+    while (cancela->filaFim != NULL || iteracoes > 0) {
+        pthread_mutex_lock(cancela->filaMutex);
+
+        if (cancela->filaInicio != NULL) {
+            Veiculo *veiculo = cancela->filaInicio;
+
+            if (veiculo == cancela->filaFim) {
+                cancela->filaFim = NULL;
+            }
+
+            veiculo->proximo = NULL;
+            cancela->filaInicio = cancela->filaInicio->proximo;
+
+            // TODO semaforo lock
+            Vaga *vaga = ocupaVaga();
+            //TODO semaforo unlock
+            printf("%d\n", vaga->numero);
+            veiculo->vaga = vaga;
+        }
+
+        pthread_mutex_unlock(cancela->filaMutex);
+    }
+
+    return NULL;
+}
+
+void *cancela() {
+    pthread_mutex_t filaMutex;
+    pthread_mutex_init(&filaMutex, NULL);
+
+    Cancela cancela = {&filaMutex, NULL, NULL};
+
+    pthread_t fila;
+    pthread_t estaciona;
+
+    pthread_create(&fila, NULL, adicionaVeiculo, &cancela);
+    pthread_create(&estaciona, NULL, removeVeiculo, &cancela);
+
+    pthread_join(fila, NULL);
+    pthread_join(estaciona, NULL);
 
     return NULL;
 }
