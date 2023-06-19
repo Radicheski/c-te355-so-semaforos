@@ -1,8 +1,11 @@
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+
+sem_t *vagaSemaforo;
 
 int vagas[10][10];
 
@@ -49,7 +52,10 @@ void criaVagas() {
 }
 
 Vaga *ocupaVaga() {
+    sem_wait(vagaSemaforo);
+
     if (proximaVaga == NULL) {
+        sem_post(vagaSemaforo);
         return NULL;
     }
 
@@ -61,6 +67,7 @@ Vaga *ocupaVaga() {
     int j = vaga->numero % 10;
     vagas[i][j] = 1;
 
+    sem_post(vagaSemaforo);
     return vaga;
 }
 
@@ -144,7 +151,7 @@ void *adicionaVeiculo(void *arg) {
 void *removeVeiculo(void *arg) {
     Cancela *cancela = (Cancela *) arg;
 
-    while (cancela->filaFim != NULL || iteracoes > 0) {
+    while (cancela->filaFim != NULL || iteracoes >= 0) {
         pthread_mutex_lock(cancela->filaMutex);
 
         if (cancela->filaInicio != NULL) {
@@ -157,10 +164,9 @@ void *removeVeiculo(void *arg) {
             veiculo->proximo = NULL;
             cancela->filaInicio = cancela->filaInicio->proximo;
 
-            // TODO semaforo lock
             Vaga *vaga = ocupaVaga();
-            //TODO semaforo unlock
-            printf("%d\n", vaga->numero);
+
+            printf("%d\t%d\n", iteracoes, vaga->numero);
             veiculo->vaga = vaga;
         }
 
@@ -197,10 +203,15 @@ int main(void) {
         return 1;
     }
 
+    vagaSemaforo = sem_open("vagas", O_CREAT, S_IRUSR | S_IWUSR, 100);
+
     pthread_create(&cancelaEntrada, NULL, cancela, NULL);
     pthread_join(cancelaEntrada, NULL);
 
     destroiVagas();
+
+    sem_close(vagaSemaforo);
+    sem_unlink("vagas");
 
     pthread_mutex_destroy(&iteracoesMutex);
 
