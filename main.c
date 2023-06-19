@@ -5,35 +5,9 @@
 #include <time.h>
 #include <unistd.h>
 
+// Vagas
+
 sem_t *vagaSemaforo;
-
-int vagas[10][10];
-
-void mostraVagas() {
-    for (int i = 0; i < 10; i++) {
-        for (int j = 0; j < 10; j++) {
-            printf("%s", vagas[i][j] == 0 ? " " : "X");
-        }
-        printf("\n");
-    }
-}
-
-int tempoEspera(int max) {
-    return rand() % (max + 1);
-}
-
-typedef struct {
-    int entrada;
-    int saida;
-} Estado;
-
-const Estado BALANCEADO_LENTO = {2, 2};
-const Estado BALANCEADO_RAPIDO = {1, 1};
-const Estado TRANQUILO = {2, 1};
-const Estado OCIOSO = {4, 1};
-const Estado CRITICO = {1, 5};
-
-Estado estado;
 
 typedef struct vaga {
     int numero;
@@ -42,13 +16,29 @@ typedef struct vaga {
 
 Vaga *proximaVaga = NULL;
 
+int vagas[10][10];
+
 void criaVagas() {
+    vagaSemaforo = sem_open("vagas", O_CREAT, S_IRUSR | S_IWUSR, 100);
+
     for (int i = 99; i >= 0; i--) {
         Vaga *v = (Vaga *) malloc(sizeof(Vaga));
         v->numero = i;
         v->proxima = proximaVaga;
         proximaVaga = v;
     }
+}
+
+void destroiVagas() {
+    Vaga *vaga = proximaVaga;
+    while (vaga != NULL) {
+        Vaga *temp = vaga;
+        vaga = vaga->proxima;
+        free(temp);
+    }
+
+    sem_close(vagaSemaforo);
+    sem_unlink("vagas");
 }
 
 Vaga *ocupaVaga() {
@@ -72,21 +62,44 @@ Vaga *ocupaVaga() {
 }
 
 void liberaVaga(Vaga *vaga) {
+    sem_wait(vagaSemaforo);
+
     vaga->proxima = proximaVaga;
     proximaVaga = vaga;
 
     int i = vaga->numero / 10;
     int j = vaga->numero % 10;
     vagas[i][j] = 0;
+
+    sem_post(vagaSemaforo);
 }
 
-void destroiVagas() {
-    Vaga *vaga = proximaVaga;
-    while (vaga != NULL) {
-        Vaga *temp = vaga;
-        vaga = vaga->proxima;
-        free(temp);
+void mostraVagas() {
+    for (int i = 0; i < 10; i++) {
+        for (int j = 0; j < 10; j++) {
+            printf("%s", vagas[i][j] == 0 ? " " : "X");
+        }
+        printf("\n");
     }
+}
+
+// Estado
+
+typedef struct {
+    int entrada;
+    int saida;
+} Estado;
+
+const Estado BALANCEADO_LENTO = {2, 2};
+const Estado BALANCEADO_RAPIDO = {1, 1};
+const Estado TRANQUILO = {2, 1};
+const Estado OCIOSO = {4, 1};
+const Estado CRITICO = {1, 5};
+
+Estado estado;
+
+int tempoEspera(int max) {
+    return rand() % (max + 1);
 }
 
 typedef struct veiculo {
@@ -98,7 +111,7 @@ typedef struct veiculo {
 
 pthread_t cancelaEntrada;
 pthread_mutex_t iteracoesMutex;
-int iteracoes = 10000;
+int iteracoes = 1000;
 
 Veiculo *chegada() {
     pthread_mutex_lock(&iteracoesMutex);
@@ -219,15 +232,10 @@ int main(void) {
         return 1;
     }
 
-    vagaSemaforo = sem_open("vagas", O_CREAT, S_IRUSR | S_IWUSR, 100);
-
     pthread_create(&cancelaEntrada, NULL, cancela, NULL);
     pthread_join(cancelaEntrada, NULL);
 
     destroiVagas();
-
-    sem_close(vagaSemaforo);
-    sem_unlink("vagas");
 
     pthread_mutex_destroy(&iteracoesMutex);
 
