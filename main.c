@@ -1,11 +1,13 @@
 #include <pthread.h>
 #include <semaphore.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
 #define TOTAL_ITERACOES 10000
+#define TOTAL_VAGAS 100
 
 int tempoEspera(int max) {
     return rand() % (max + 1);
@@ -16,33 +18,25 @@ int tempoEspera(int max) {
 sem_t *vagaSemaforo;
 
 typedef struct vaga {
-    int numero;
+    bool ocupada;
     struct vaga *proxima;
 } Vaga;
 
+Vaga vagas[TOTAL_VAGAS];
 Vaga *proximaVaga = NULL;
-
-int vagas[10][10];
 
 void criaVagas() {
     vagaSemaforo = sem_open("vagas", O_CREAT, S_IRUSR | S_IWUSR, 100);
 
-    for (int i = 99; i >= 0; i--) {
-        Vaga *v = (Vaga *) malloc(sizeof(Vaga));
-        v->numero = i;
-        v->proxima = proximaVaga;
-        proximaVaga = v;
+    proximaVaga = &vagas[0];
+
+    for (int i = 0; i < TOTAL_VAGAS; i++) {
+        vagas[i].ocupada = false;
+        vagas[i].proxima = i + 1 < TOTAL_VAGAS ? &vagas[i + 1] : NULL;
     }
 }
 
 void destroiVagas() {
-    Vaga *vaga = proximaVaga;
-    while (vaga != NULL) {
-        Vaga *temp = vaga;
-        vaga = vaga->proxima;
-        free(temp);
-    }
-
     sem_close(vagaSemaforo);
     sem_unlink("vagas");
 }
@@ -56,12 +50,10 @@ Vaga *ocupaVaga() {
     }
 
     Vaga *vaga = proximaVaga;
-    proximaVaga = vaga->proxima;
+    proximaVaga = proximaVaga->proxima;
     vaga->proxima = NULL;
 
-    int i = vaga->numero / 10;
-    int j = vaga->numero % 10;
-    vagas[i][j] = 1;
+    vaga->ocupada = true;
 
     sem_post(vagaSemaforo);
     return vaga;
@@ -73,9 +65,7 @@ void liberaVaga(Vaga *vaga) {
     vaga->proxima = proximaVaga;
     proximaVaga = vaga;
 
-    int i = vaga->numero / 10;
-    int j = vaga->numero % 10;
-    vagas[i][j] = 0;
+    vaga->ocupada = false;
 
     sem_post(vagaSemaforo);
 }
@@ -83,7 +73,7 @@ void liberaVaga(Vaga *vaga) {
 void mostraVagas() {
     for (int i = 0; i < 10; i++) {
         for (int j = 0; j < 10; j++) {
-            printf("%s", vagas[i][j] == 0 ? " " : "X");
+            printf("%s", vagas[10 * i + j].ocupada ? " " : "X");
         }
         printf("\n");
     }
@@ -211,7 +201,7 @@ void *removeVeiculo(void *arg) {
 
             pthread_create(&veiculo->thread, NULL, espera, veiculo);
 
-            printf("%d\t%d\n", proximoVeiculo, vaga->numero);
+            printf("%d\n", proximoVeiculo);
         }
 
         pthread_mutex_unlock(cancela->filaMutex);
