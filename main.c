@@ -1,86 +1,16 @@
-#include <pthread.h>
 #include <semaphore.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <pthread.h>
 #include <time.h>
+#include <stdlib.h>
 #include <unistd.h>
 
-#define TOTAL_ITERACOES 10000
-#define TOTAL_VAGAS 100
-
-int tempoEspera(int max) {
-    return rand() % (max + 1);
-}
-
-// Vagas
-
-sem_t *vagaSemaforo;
-
-typedef struct vaga {
-    bool ocupada;
-    struct vaga *proxima;
-} Vaga;
-
-Vaga vagas[TOTAL_VAGAS];
-Vaga *proximaVaga = NULL;
-
-void criaVagas() {
-    vagaSemaforo = sem_open("vagas", O_CREAT, S_IRUSR | S_IWUSR, 100);
-
-    proximaVaga = &vagas[0];
-
-    for (int i = 0; i < TOTAL_VAGAS; i++) {
-        vagas[i].ocupada = false;
-        vagas[i].proxima = i + 1 < TOTAL_VAGAS ? &vagas[i + 1] : NULL;
-    }
-}
-
-void destroiVagas() {
-    sem_close(vagaSemaforo);
-    sem_unlink("vagas");
-}
-
-Vaga *ocupaVaga() {
-    sem_wait(vagaSemaforo);
-
-    if (proximaVaga == NULL) {
-        sem_post(vagaSemaforo);
-        return NULL;
-    }
-
-    Vaga *vaga = proximaVaga;
-    proximaVaga = proximaVaga->proxima;
-    vaga->proxima = NULL;
-
-    vaga->ocupada = true;
-
-    sem_post(vagaSemaforo);
-    return vaga;
-}
-
-void liberaVaga(Vaga *vaga) {
-    sem_wait(vagaSemaforo);
-
-    vaga->proxima = proximaVaga;
-    proximaVaga = vaga;
-
-    vaga->ocupada = false;
-
-    sem_post(vagaSemaforo);
-}
-
-void mostraVagas() {
-    for (int i = 0; i < 10; i++) {
-        for (int j = 0; j < 10; j++) {
-            printf("%s", vagas[10 * i + j].ocupada ? " " : "X");
-        }
-        printf("\n");
-    }
-}
+#define VAGAS_TOTAL 100
+#define VEICULOS_TOTAL 10000
+#define CANCELAS_TOTAL 20
 
 // Estado
-
 typedef struct {
     int entrada;
     int saida;
@@ -94,155 +24,272 @@ const Estado CRITICO = {1, 5};
 
 Estado estado;
 
-// Veículos
+// Vagas
+typedef struct vaga {
+    bool ocupada;
+    struct vaga *proxima;
+} Vaga;
+pthread_mutex_t vagasListaMutex;
+sem_t *vagasSemaforo;
+char *nomeSemaforo = "vagas";
+
+Vaga vagas[VAGAS_TOTAL];
+
+Vaga *primeiraVaga;
+
+void criaVagas() {
+    sem_unlink(nomeSemaforo);
+    vagasSemaforo = sem_open(nomeSemaforo, O_CREAT, S_IRUSR | S_IWUSR, VAGAS_TOTAL);
+
+    pthread_mutex_init(&vagasListaMutex, NULL);
+
+    primeiraVaga = &vagas[0];
+
+    for (int i = 1; i < VAGAS_TOTAL; i++) {
+        vagas[i].ocupada = false;
+        vagas[i - 1].proxima = &vagas[i];
+    }
+}
+
+Vaga *ocupaVaga() {
+    sem_wait(vagasSemaforo);
+
+    pthread_mutex_lock(&vagasListaMutex);
+
+    Vaga *vaga = primeiraVaga;
+    primeiraVaga = primeiraVaga->proxima;
+    vaga->proxima = NULL;
+    vaga->ocupada = true;
+
+    pthread_mutex_unlock(&vagasListaMutex);
+
+    return vaga;
+}
+
+void liberaVaga(Vaga *vaga) {
+    pthread_mutex_lock(&vagasListaMutex);
+
+    if (primeiraVaga != NULL) {
+        vaga->proxima = primeiraVaga;
+    }
+
+    primeiraVaga = vaga;
+    vaga->ocupada = false;
+
+    pthread_mutex_unlock(&vagasListaMutex);
+
+    sem_post(vagasSemaforo);
+}
+
+void destroiVagas() {
+    sem_close(vagasSemaforo);
+    sem_unlink(nomeSemaforo);
+
+    pthread_mutex_destroy(&vagasListaMutex);
+}
+
+// Veiculos
 
 typedef struct veiculo {
-    Vaga *vaga;
-    time_t chegada;
-    int tempoPermanencia;
-    struct veiculo *proximo;
+    int tempoEspera;
     pthread_t thread;
+    time_t chegada;
+    time_t entrada;
+    struct vaga *vaga;
+    struct veiculo *proximo;
 } Veiculo;
+pthread_mutex_t veiculosListaMutex;
+Veiculo veiculos[VEICULOS_TOTAL];
 
-Veiculo veiculos[TOTAL_ITERACOES];
-pthread_mutex_t veiculosMutex;
-int proximoVeiculo = 0;
+int indiceProximoVeiculo = 0;
+
+int tempoAleatorio(int max) {
+    return rand() % (max + 1);
+}
 
 void criaVeiculos() {
-    pthread_mutex_init(&veiculosMutex, NULL);
+    pthread_mutex_init(&veiculosListaMutex, NULL);
 
-    for (int i = 0; i < TOTAL_ITERACOES; i++) {
-        veiculos[i].tempoPermanencia = tempoEspera(estado.saida);
+    for (int i = 0; i < VEICULOS_TOTAL; i++) {
+        veiculos[i].tempoEspera = tempoAleatorio(estado.saida);
     }
+}
+
+Veiculo *proximoVeiculo() {
+    pthread_mutex_lock(&veiculosListaMutex);
+
+    if (indiceProximoVeiculo >= VEICULOS_TOTAL) {
+        pthread_mutex_unlock(&veiculosListaMutex);
+        return NULL;
+    }
+
+    Veiculo *veiculo = &veiculos[indiceProximoVeiculo++];
+
+    pthread_mutex_unlock(&veiculosListaMutex);
+
+    return veiculo;
+}
+
+void *aguarda(void *arg) {
+    Veiculo *veiculo = (Veiculo *) arg;
+    sleep(veiculo->tempoEspera);
+    liberaVaga(veiculo->vaga);
+    pthread_exit(0);
 }
 
 void destroiVeiculos() {
-    pthread_mutex_destroy(&veiculosMutex);
-}
+    pthread_mutex_destroy(&veiculosListaMutex);
 
-Veiculo *chegada() {
-    pthread_mutex_lock(&veiculosMutex);
-
-    if (proximoVeiculo >= TOTAL_ITERACOES) {
-        return NULL;
+    for (int i = 0; i < VEICULOS_TOTAL; i++) {
+        pthread_join(veiculos[i].thread, NULL);
     }
-    Veiculo *v = &veiculos[proximoVeiculo++];
-
-    pthread_mutex_unlock(&veiculosMutex);
-
-    v->tempoPermanencia = tempoEspera(estado.saida);
-    v->proximo = NULL;
-    v->chegada = time(NULL);
-
-    return v;
 }
 
-pthread_t cancelaEntrada;
+// Cancela
 
-typedef struct {
-    pthread_mutex_t *filaMutex;
-    Veiculo *filaInicio;
-    Veiculo *filaFim;
+typedef struct cancela{
+    pthread_t thread;
+    pthread_t adicionaThread;
+    pthread_t removeThread;
+    pthread_mutex_t filaVeiculosMutex;
+    struct veiculo *primeiroVeiculo;
+    struct veiculo *ultimoVeiculo;
 } Cancela;
+
+Cancela cancelas[CANCELAS_TOTAL];
 
 void *adicionaVeiculo(void *arg) {
     Cancela *cancela = (Cancela *) arg;
 
     Veiculo *veiculo;
 
-    while ((veiculo = chegada()) != NULL) {
-        pthread_mutex_lock(cancela->filaMutex);
+    while ((veiculo = proximoVeiculo()) != NULL) {
+        pthread_mutex_lock(&cancela->filaVeiculosMutex);
 
-        if (cancela->filaInicio == NULL) {
-            cancela->filaInicio = veiculo;
+        if (cancela->primeiroVeiculo == NULL) {
+            cancela->primeiroVeiculo = veiculo;
         }
 
-        if (cancela->filaFim != NULL) {
-            cancela->filaFim->proximo = veiculo;
+        if (cancela->ultimoVeiculo != NULL) {
+            cancela->ultimoVeiculo->proximo = veiculo;
         }
-        cancela->filaFim = veiculo;
+        cancela->ultimoVeiculo = veiculo;
 
-        pthread_mutex_unlock(cancela->filaMutex);
+        pthread_mutex_unlock(&cancela->filaVeiculosMutex);
 
-        sleep(tempoEspera(estado.entrada));
+        time(&veiculo->chegada);
+
+        sleep(tempoAleatorio(estado.entrada));
     }
 
-    return NULL;
-}
-
-void *espera(void *arg) {
-    Veiculo *veiculo = (Veiculo *) arg;
-
-    sleep(veiculo->tempoPermanencia);
-    liberaVaga(veiculo->vaga);
-    veiculo->vaga = NULL;
-
-    return NULL;
+    pthread_exit(0);
 }
 
 void *removeVeiculo(void *arg) {
     Cancela *cancela = (Cancela *) arg;
 
-    while (cancela->filaFim != NULL || proximoVeiculo < TOTAL_ITERACOES) {
-        pthread_mutex_lock(cancela->filaMutex);
+    while (true) {
+        pthread_mutex_lock(&cancela->filaVeiculosMutex);
+        pthread_mutex_lock(&veiculosListaMutex);
 
-        if (cancela->filaInicio != NULL) {
-            Veiculo *veiculo = cancela->filaInicio;
+        if (cancela->ultimoVeiculo == NULL && indiceProximoVeiculo >= VEICULOS_TOTAL) {
+            pthread_mutex_unlock(&veiculosListaMutex);
+            pthread_mutex_unlock(&cancela->filaVeiculosMutex);
 
-            if (veiculo == cancela->filaFim) {
-                cancela->filaFim = NULL;
-            }
-
-            cancela->filaInicio = cancela->filaInicio->proximo;
-            veiculo->proximo = NULL;
-
-            Vaga *vaga = ocupaVaga();
-            veiculo->vaga = vaga;
-
-            pthread_create(&veiculo->thread, NULL, espera, veiculo);
-
-            printf("%d\n", proximoVeiculo);
+            break;
         }
 
-        pthread_mutex_unlock(cancela->filaMutex);
+        pthread_mutex_unlock(&veiculosListaMutex);
+
+        Veiculo *veiculo = cancela->primeiroVeiculo;
+
+        if (veiculo == NULL) {
+            pthread_mutex_unlock(&cancela->filaVeiculosMutex);
+            continue;
+        }
+
+        cancela->primeiroVeiculo = veiculo->proximo;
+        veiculo->proximo = NULL;
+
+        if (veiculo == cancela->ultimoVeiculo) {
+            cancela->ultimoVeiculo = NULL;
+        }
+
+        pthread_mutex_unlock(&cancela->filaVeiculosMutex);
+
+        veiculo->vaga = ocupaVaga();
+        time(&veiculo->entrada);
+
+        pthread_create(&veiculo->thread, NULL, aguarda, veiculo);
     }
 
-    return NULL;
+    pthread_exit(0);
 }
 
-void *cancela() {
-    pthread_mutex_t filaMutex;
-    pthread_mutex_init(&filaMutex, NULL);
+void *gerenciaCancela(void *arg) {
+    Cancela *cancela = (Cancela *) arg;
 
-    Cancela cancela = {&filaMutex, NULL, NULL};
+    pthread_create(&cancela->adicionaThread, NULL, adicionaVeiculo, cancela);
+    pthread_create(&cancela->removeThread, NULL, removeVeiculo, cancela);
 
-    pthread_t fila;
-    pthread_t estaciona;
+    pthread_join(cancela->adicionaThread, NULL);
+    pthread_join(cancela->removeThread, NULL);
 
-    pthread_create(&fila, NULL, adicionaVeiculo, &cancela);
-    pthread_create(&estaciona, NULL, removeVeiculo, &cancela);
+    pthread_exit(0);
+}
 
-    pthread_join(fila, NULL);
-    pthread_join(estaciona, NULL);
+void criaCancelas() {
+    for (int i = 0; i < CANCELAS_TOTAL; i++) {
+        pthread_mutex_init(&cancelas[i].filaVeiculosMutex, NULL);
+        pthread_create(&cancelas[i].thread, NULL, gerenciaCancela, &cancelas[i]);
+    }
+}
 
-    return NULL;
+void destroiCancelas() {
+    for (int i = 0; i < CANCELAS_TOTAL; i++) {
+        pthread_join(cancelas[i].thread, NULL);
+        pthread_mutex_destroy(&cancelas[i].filaVeiculosMutex);
+    }
+}
+
+// Exibição
+
+bool executando = true;
+void *mostraVagas() {
+    while (executando) {
+        printf("\033[2J\033[H");
+        for (int i = 0; i < 10; i++) {
+            for (int j = 0; j < 10; j++) {
+                printf("%s", vagas[i * 10 + j].ocupada ? "O" : "_");
+            }
+            printf("\n");
+        }
+        printf("%d\n", indiceProximoVeiculo);
+        usleep(100000);
+    }
+
+    pthread_exit(0);
 }
 
 int main(void) {
-    criaVagas();
-    criaVeiculos();
-
     estado = CRITICO;
 
-    pthread_create(&cancelaEntrada, NULL, cancela, NULL);
-    pthread_join(cancelaEntrada, NULL);
+    sranddev();
 
-    for (int i = 0; i < TOTAL_ITERACOES; i++) {
-        pthread_join(veiculos[i].thread, NULL);
-    }
+    criaVagas();
+    criaVeiculos();
+    criaCancelas();
 
-    destroiVagas();
+    pthread_t exibeVagas;
+    pthread_create(&exibeVagas, NULL, mostraVagas, NULL);
+
+    destroiCancelas();
     destroiVeiculos();
+    destroiVagas();
+
+    executando = false;
+
+    pthread_join(exibeVagas, NULL);
 
     return 0;
 }
