@@ -5,6 +5,12 @@
 #include <time.h>
 #include <unistd.h>
 
+#define TOTAL_ITERACOES 10000
+
+int tempoEspera(int max) {
+    return rand() % (max + 1);
+}
+
 // Vagas
 
 sem_t *vagaSemaforo;
@@ -98,37 +104,50 @@ const Estado CRITICO = {1, 5};
 
 Estado estado;
 
-int tempoEspera(int max) {
-    return rand() % (max + 1);
-}
+// Veículos
 
 typedef struct veiculo {
     Vaga *vaga;
     time_t chegada;
     int tempoPermanencia;
     struct veiculo *proximo;
+    pthread_t thread;
 } Veiculo;
 
-pthread_t cancelaEntrada;
-pthread_mutex_t iteracoesMutex;
-int iteracoes = 1000;
+Veiculo veiculos[TOTAL_ITERACOES];
+pthread_mutex_t veiculosMutex;
+int proximoVeiculo = 0;
+
+void criaVeiculos() {
+    pthread_mutex_init(&veiculosMutex, NULL);
+
+    for (int i = 0; i < TOTAL_ITERACOES; i++) {
+        veiculos[i].tempoPermanencia = tempoEspera(estado.saida);
+    }
+}
+
+void destroiVeiculos() {
+    pthread_mutex_destroy(&veiculosMutex);
+}
 
 Veiculo *chegada() {
-    pthread_mutex_lock(&iteracoesMutex);
+    pthread_mutex_lock(&veiculosMutex);
 
-    if (iteracoes-- == 0) {
+    if (proximoVeiculo >= TOTAL_ITERACOES) {
         return NULL;
     }
+    Veiculo *v = &veiculos[proximoVeiculo++];
 
-    pthread_mutex_unlock(&iteracoesMutex);
+    pthread_mutex_unlock(&veiculosMutex);
 
-    Veiculo *v = (Veiculo *) malloc(sizeof(Veiculo));
     v->tempoPermanencia = tempoEspera(estado.saida);
     v->proximo = NULL;
     v->chegada = time(NULL);
 
     return v;
 }
+
+pthread_t cancelaEntrada;
 
 typedef struct {
     pthread_mutex_t *filaMutex;
@@ -166,9 +185,7 @@ void *espera(void *arg) {
 
     sleep(veiculo->tempoPermanencia);
     liberaVaga(veiculo->vaga);
-
-    //TODO Apagar depois de criar lista de veículos
-    free(veiculo);
+    veiculo->vaga = NULL;
 
     return NULL;
 }
@@ -176,7 +193,7 @@ void *espera(void *arg) {
 void *removeVeiculo(void *arg) {
     Cancela *cancela = (Cancela *) arg;
 
-    while (cancela->filaFim != NULL || iteracoes >= 0) {
+    while (cancela->filaFim != NULL || proximoVeiculo < TOTAL_ITERACOES) {
         pthread_mutex_lock(cancela->filaMutex);
 
         if (cancela->filaInicio != NULL) {
@@ -186,17 +203,15 @@ void *removeVeiculo(void *arg) {
                 cancela->filaFim = NULL;
             }
 
-            veiculo->proximo = NULL;
             cancela->filaInicio = cancela->filaInicio->proximo;
+            veiculo->proximo = NULL;
 
             Vaga *vaga = ocupaVaga();
-
-            //TODO Dar join. Colocar thread dentro da struct veiculo
-            pthread_t esperaNaVaga;
-            pthread_create(&esperaNaVaga, NULL, espera, veiculo);
-
-            printf("%d\t%d\n", iteracoes, vaga->numero);
             veiculo->vaga = vaga;
+
+            pthread_create(&veiculo->thread, NULL, espera, veiculo);
+
+            printf("%d\t%d\n", proximoVeiculo, vaga->numero);
         }
 
         pthread_mutex_unlock(cancela->filaMutex);
@@ -225,19 +240,19 @@ void *cancela() {
 
 int main(void) {
     criaVagas();
+    criaVeiculos();
 
     estado = CRITICO;
-
-    if (pthread_mutex_init(&iteracoesMutex, NULL) != 0) {
-        return 1;
-    }
 
     pthread_create(&cancelaEntrada, NULL, cancela, NULL);
     pthread_join(cancelaEntrada, NULL);
 
-    destroiVagas();
+    for (int i = 0; i < TOTAL_ITERACOES; i++) {
+        pthread_join(veiculos[i].thread, NULL);
+    }
 
-    pthread_mutex_destroy(&iteracoesMutex);
+    destroiVagas();
+    destroiVeiculos();
 
     return 0;
 }
