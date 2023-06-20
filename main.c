@@ -1,30 +1,44 @@
 #include <semaphore.h>
 #include <stdbool.h>
+#include <math.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <time.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 
 #define VAGAS_TOTAL 100
 #define VEICULOS_TOTAL 10000
 #define CANCELAS_TOTAL 20
 
 // Estado
+
 typedef struct {
     int entrada;
     int saida;
 } Estado;
 
-const Estado BALANCEADO_LENTO = {2, 2};
-const Estado BALANCEADO_RAPIDO = {1, 1};
-const Estado TRANQUILO = {2, 1};
-const Estado OCIOSO = {4, 1};
-const Estado CRITICO = {1, 5};
+const Estado estados[] = {
+        {2, 2},
+        {1, 1},
+        {2, 1},
+        {4, 1},
+        {1, 5}
+};
 
-Estado estado;
+typedef enum {
+    BALANCEADO_LENTO,
+    BALANCEADO_RAPIDO,
+    TRANQUILO,
+    OCIOSO,
+    CRITICO
+} OpcaoEstado;
+
+OpcaoEstado estado = CRITICO;
 
 // Vagas
+
 typedef struct vaga {
     bool ocupada;
     struct vaga *proxima;
@@ -32,20 +46,23 @@ typedef struct vaga {
 pthread_mutex_t vagasListaMutex;
 sem_t *vagasSemaforo;
 char *nomeSemaforo = "vagas";
+int vagasTotal = VAGAS_TOTAL;
 
-Vaga vagas[VAGAS_TOTAL];
+Vaga *vagas;
 
 Vaga *primeiraVaga;
 
 void criaVagas() {
     sem_unlink(nomeSemaforo);
-    vagasSemaforo = sem_open(nomeSemaforo, O_CREAT, S_IRUSR | S_IWUSR, VAGAS_TOTAL);
+    vagasSemaforo = sem_open(nomeSemaforo, O_CREAT, S_IRUSR | S_IWUSR, vagasTotal);
 
     pthread_mutex_init(&vagasListaMutex, NULL);
 
+    vagas = (Vaga *) malloc(vagasTotal * sizeof(Vaga));
+
     primeiraVaga = &vagas[0];
 
-    for (int i = 1; i < VAGAS_TOTAL; i++) {
+    for (int i = 1; i < vagasTotal; i++) {
         vagas[i].ocupada = false;
         vagas[i - 1].proxima = &vagas[i];
     }
@@ -86,6 +103,8 @@ void destroiVagas() {
     sem_unlink(nomeSemaforo);
 
     pthread_mutex_destroy(&vagasListaMutex);
+
+    free(vagas);
 }
 
 // Veiculos
@@ -99,7 +118,8 @@ typedef struct veiculo {
     struct veiculo *proximo;
 } Veiculo;
 pthread_mutex_t veiculosListaMutex;
-Veiculo veiculos[VEICULOS_TOTAL];
+int veiculosTotal = VEICULOS_TOTAL;
+Veiculo *veiculos;
 
 int indiceProximoVeiculo = 0;
 
@@ -110,15 +130,17 @@ int tempoAleatorio(int max) {
 void criaVeiculos() {
     pthread_mutex_init(&veiculosListaMutex, NULL);
 
-    for (int i = 0; i < VEICULOS_TOTAL; i++) {
-        veiculos[i].tempoEspera = tempoAleatorio(estado.saida);
+    veiculos = (Veiculo *) malloc(veiculosTotal * sizeof(Veiculo));
+
+    for (int i = 0; i < veiculosTotal; i++) {
+        veiculos[i].tempoEspera = tempoAleatorio(estados[estado].saida);
     }
 }
 
 Veiculo *proximoVeiculo() {
     pthread_mutex_lock(&veiculosListaMutex);
 
-    if (indiceProximoVeiculo >= VEICULOS_TOTAL) {
+    if (indiceProximoVeiculo >= veiculosTotal) {
         pthread_mutex_unlock(&veiculosListaMutex);
         return NULL;
     }
@@ -140,9 +162,11 @@ void *aguarda(void *arg) {
 void destroiVeiculos() {
     pthread_mutex_destroy(&veiculosListaMutex);
 
-    for (int i = 0; i < VEICULOS_TOTAL; i++) {
+    for (int i = 0; i < veiculosTotal; i++) {
         pthread_join(veiculos[i].thread, NULL);
     }
+
+    free(veiculos);
 }
 
 // Cancela
@@ -158,7 +182,8 @@ typedef struct cancela{
     int tamanhoFila;
 } Cancela;
 
-Cancela cancelas[CANCELAS_TOTAL];
+int cancelasTotal = CANCELAS_TOTAL;
+Cancela *cancelas;
 
 void *adicionaVeiculo(void *arg) {
     Cancela *cancela = (Cancela *) arg;
@@ -184,7 +209,7 @@ void *adicionaVeiculo(void *arg) {
 
         time(&veiculo->chegada);
 
-        sleep(tempoAleatorio(estado.entrada));
+        sleep(tempoAleatorio(estados[estado].entrada));
     }
 
     pthread_exit(0);
@@ -197,7 +222,7 @@ void *removeVeiculo(void *arg) {
         pthread_mutex_lock(&cancela->filaVeiculosMutex);
         pthread_mutex_lock(&veiculosListaMutex);
 
-        if (cancela->ultimoVeiculo == NULL && indiceProximoVeiculo >= VEICULOS_TOTAL) {
+        if (cancela->ultimoVeiculo == NULL && indiceProximoVeiculo >= veiculosTotal) {
             pthread_mutex_unlock(&veiculosListaMutex);
             pthread_mutex_unlock(&cancela->filaVeiculosMutex);
 
@@ -246,7 +271,9 @@ void *gerenciaCancela(void *arg) {
 }
 
 void criaCancelas() {
-    for (int i = 0; i < CANCELAS_TOTAL; i++) {
+    cancelas = (Cancela *) malloc(cancelasTotal * sizeof(Cancela));
+
+    for (int i = 0; i < cancelasTotal; i++) {
         pthread_mutex_init(&cancelas[i].filaVeiculosMutex, NULL);
         pthread_create(&cancelas[i].thread, NULL, gerenciaCancela, &cancelas[i]);
         cancelas[i].veiculosAtendidos = 0;
@@ -255,40 +282,77 @@ void criaCancelas() {
 }
 
 void destroiCancelas() {
-    for (int i = 0; i < CANCELAS_TOTAL; i++) {
+    for (int i = 0; i < cancelasTotal; i++) {
         pthread_join(cancelas[i].thread, NULL);
         pthread_mutex_destroy(&cancelas[i].filaVeiculosMutex);
     }
+
+    free(cancelas);
 }
 
 // Exibição
 
 bool executando = true;
 void *mostraVagas() {
+    int maxJ = (int) sqrt(vagasTotal);
+    int maxI = vagasTotal / maxJ;
+
     while (executando) {
         printf("\033[2J\033[H");
-        for (int i = 0; i < 10; i++) {
-            for (int j = 0; j < 10; j++) {
-                printf("%s", vagas[i * 10 + j].ocupada ? "O" : "_");
+        for (int i = 0; i < maxI; i++) {//FIXME número de vagas
+            for (int j = 0; j < maxJ; j++) {
+                printf("%s", vagas[i * maxI + j].ocupada ? "O" : "_");
             }
             printf("\n");
         }
 
         printf("\nCancela\t\tAtendidos\tNa fila\n");
 
-        for (int i = 0; i < CANCELAS_TOTAL; i++) {
+        for (int i = 0; i < cancelasTotal; i++) {
             printf("%d\t\t%d\t\t%d\n", i, cancelas[i].veiculosAtendidos, cancelas[i].tamanhoFila);
         }
 
-        printf("\nVeículos restantes: %d\n", VEICULOS_TOTAL - indiceProximoVeiculo);
+        printf("\nVeículos restantes: %d\n", veiculosTotal - indiceProximoVeiculo);
         usleep(100000);
     }
 
     pthread_exit(0);
 }
 
-int main(void) {
-    estado = CRITICO;
+void argumentos(int argc, char *argv[]) {
+    // Parse the command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-v") == 0 && i + 1 < argc) {
+            vagasTotal = atoi(argv[i + 1]);
+            vagasTotal = vagasTotal < VAGAS_TOTAL ? vagasTotal : VAGAS_TOTAL;
+            i++; // Skip the value that was just processed
+        } else if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
+            veiculosTotal = atoi(argv[i + 1]);
+            veiculosTotal = veiculosTotal < VEICULOS_TOTAL ? veiculosTotal : VEICULOS_TOTAL;
+            i++;
+        } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
+            cancelasTotal = atoi(argv[i + 1]);
+            cancelasTotal = cancelasTotal < CANCELAS_TOTAL ? cancelasTotal : CANCELAS_TOTAL;
+            i++;
+        } else if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
+            if (strcmp(argv[i + 1], "lento") == 0) {
+                estado = BALANCEADO_LENTO;
+            } else if (strcmp(argv[i + 1], "rapido") == 0) {
+                estado = BALANCEADO_RAPIDO;
+            } else if (strcmp(argv[i + 1], "tranquilo") == 0) {
+                estado = TRANQUILO;
+            } else if (strcmp(argv[i + 1], "ocioso") == 0) {
+                estado = OCIOSO;
+            } else if (strcmp(argv[i + 1], "critico") == 0) {
+                estado = CRITICO;
+            }
+            i++;
+        }
+    }
+}
+
+int main(int argc, char *argv[]) {
+    argumentos(argc, argv);
 
     sranddev();
 
