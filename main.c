@@ -154,6 +154,8 @@ typedef struct cancela{
     pthread_mutex_t filaVeiculosMutex;
     struct veiculo *primeiroVeiculo;
     struct veiculo *ultimoVeiculo;
+    int veiculosAtendidos;
+    int tamanhoFila;
 } Cancela;
 
 Cancela cancelas[CANCELAS_TOTAL];
@@ -174,6 +176,9 @@ void *adicionaVeiculo(void *arg) {
             cancela->ultimoVeiculo->proximo = veiculo;
         }
         cancela->ultimoVeiculo = veiculo;
+
+        cancela->veiculosAtendidos++;
+        cancela->tamanhoFila++;
 
         pthread_mutex_unlock(&cancela->filaVeiculosMutex);
 
@@ -215,6 +220,8 @@ void *removeVeiculo(void *arg) {
             cancela->ultimoVeiculo = NULL;
         }
 
+        cancela->tamanhoFila--;
+
         pthread_mutex_unlock(&cancela->filaVeiculosMutex);
 
         veiculo->vaga = ocupaVaga();
@@ -242,6 +249,8 @@ void criaCancelas() {
     for (int i = 0; i < CANCELAS_TOTAL; i++) {
         pthread_mutex_init(&cancelas[i].filaVeiculosMutex, NULL);
         pthread_create(&cancelas[i].thread, NULL, gerenciaCancela, &cancelas[i]);
+        cancelas[i].veiculosAtendidos = 0;
+        cancelas[i].tamanhoFila = 0;
     }
 }
 
@@ -264,7 +273,14 @@ void *mostraVagas() {
             }
             printf("\n");
         }
-        printf("%d\n", indiceProximoVeiculo);
+
+        printf("\nCancela\t\tAtendidos\tNa fila\n");
+
+        for (int i = 0; i < CANCELAS_TOTAL; i++) {
+            printf("%d\t\t%d\t\t%d\n", i, cancelas[i].veiculosAtendidos, cancelas[i].tamanhoFila);
+        }
+
+        printf("\nVeículos restantes: %d\n", VEICULOS_TOTAL - indiceProximoVeiculo);
         usleep(100000);
     }
 
