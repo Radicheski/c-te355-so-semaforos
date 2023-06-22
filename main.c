@@ -180,7 +180,7 @@ typedef struct cancela{
     struct veiculo *ultimoVeiculo;
     int veiculosAtendidos;
     int tamanhoFila;
-    time_t minimo;
+    int precisaAguardar;
     time_t maximo;
     time_t total;
 } Cancela;
@@ -255,16 +255,20 @@ void *removeVeiculo(void *arg) {
         veiculo->vaga = ocupaVaga();
         time(&veiculo->entrada);
 
+        pthread_create(&veiculo->thread, NULL, aguarda, veiculo);
+
         time_t espera = veiculo->entrada - veiculo->chegada;
+
+        pthread_mutex_lock(&cancela->filaVeiculosMutex);
         cancela->total += espera;
-        if (espera < cancela->minimo) {
-            cancela->minimo = espera;
-        }
         if (espera > cancela->maximo) {
             cancela->maximo = espera;
         }
+        if (espera > 0) {
+            cancela->precisaAguardar++;
+        }
+        pthread_mutex_unlock(&cancela->filaVeiculosMutex);
 
-        pthread_create(&veiculo->thread, NULL, aguarda, veiculo);
     }
 
     pthread_exit(0);
@@ -306,24 +310,22 @@ void destroiCancelas() {
 
 bool executando = true;
 void *mostraVagas() {
-    int maxJ = (int) sqrt(vagasTotal);
-    int maxI = vagasTotal / maxJ;
+    int maxI = (int) sqrt(vagasTotal);
 
     while (executando) {
         printf("\033[2J\033[H");
-        for (int i = 0; i < maxI; i++) {//FIXME número de vagas
-            for (int j = 0; j < maxJ; j++) {
-                printf("%s", vagas[i * maxI + j].ocupada ? "O" : "_");
-            }
-            printf("\n");
+        for (int i = 0; i < vagasTotal; i++) {
+            if (i % maxI == 0) { printf("\n"); }
+            printf("%s", vagas[i].ocupada ? "O" : "_");
         }
 
-        printf("\nCancela\t\tAtendidos\tNa fila\tMínimo\tMáximo\tMédio\n");
+        printf("\n\nCancela\t\tAtendidos\tNa fila\t\tAguardaram\tTempo máximo\tTempo médio\n");//FIXME Mudar título
 
         for (int i = 0; i < cancelasTotal; i++) {
-            printf("%d\t\t%d\t\t%d\t%ld\t%ld\t%ld\n", i, cancelas[i].veiculosAtendidos, cancelas[i].tamanhoFila,
-                   cancelas[i].minimo, cancelas[i].maximo
-                   ,cancelas[i].veiculosAtendidos == 0 ? 0 : cancelas[i].total / cancelas[i].veiculosAtendidos);
+            printf("%d\t\t%d\t\t%d\t\t%.2f%%\t\t%ld\t\t%.3f\n", i, cancelas[i].veiculosAtendidos, cancelas[i].tamanhoFila,
+                   cancelas[i].veiculosAtendidos == 0 ? 0 : 100.0 * cancelas[i].precisaAguardar / cancelas[i].veiculosAtendidos,
+                   cancelas[i].maximo,
+                   cancelas[i].veiculosAtendidos == 0 ? 0 : (float) cancelas[i].total / cancelas[i].veiculosAtendidos);
         }
 
         printf("\nVeículos restantes: %d\n", veiculosTotal - indiceProximoVeiculo);
