@@ -180,6 +180,9 @@ typedef struct cancela{
     struct veiculo *ultimoVeiculo;
     int veiculosAtendidos;
     int tamanhoFila;
+    time_t minimo;
+    time_t maximo;
+    time_t total;
 } Cancela;
 
 int cancelasTotal = CANCELAS_TOTAL;
@@ -205,9 +208,9 @@ void *adicionaVeiculo(void *arg) {
         cancela->veiculosAtendidos++;
         cancela->tamanhoFila++;
 
-        pthread_mutex_unlock(&cancela->filaVeiculosMutex);
-
         time(&veiculo->chegada);
+
+        pthread_mutex_unlock(&cancela->filaVeiculosMutex);
 
         sleep(tempoAleatorio(estados[estado].entrada));
     }
@@ -251,6 +254,15 @@ void *removeVeiculo(void *arg) {
 
         veiculo->vaga = ocupaVaga();
         time(&veiculo->entrada);
+
+        time_t espera = veiculo->entrada - veiculo->chegada;
+        cancela->total += espera;
+        if (espera < cancela->minimo) {
+            cancela->minimo = espera;
+        }
+        if (espera > cancela->maximo) {
+            cancela->maximo = espera;
+        }
 
         pthread_create(&veiculo->thread, NULL, aguarda, veiculo);
     }
@@ -306,10 +318,12 @@ void *mostraVagas() {
             printf("\n");
         }
 
-        printf("\nCancela\t\tAtendidos\tNa fila\n");
+        printf("\nCancela\t\tAtendidos\tNa fila\tMínimo\tMáximo\tMédio\n");
 
         for (int i = 0; i < cancelasTotal; i++) {
-            printf("%d\t\t%d\t\t%d\n", i, cancelas[i].veiculosAtendidos, cancelas[i].tamanhoFila);
+            printf("%d\t\t%d\t\t%d\t%ld\t%ld\t%ld\n", i, cancelas[i].veiculosAtendidos, cancelas[i].tamanhoFila,
+                   cancelas[i].minimo, cancelas[i].maximo
+                   ,cancelas[i].veiculosAtendidos == 0 ? 0 : cancelas[i].total / cancelas[i].veiculosAtendidos);
         }
 
         printf("\nVeículos restantes: %d\n", veiculosTotal - indiceProximoVeiculo);
